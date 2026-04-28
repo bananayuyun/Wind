@@ -6,60 +6,20 @@
 const ALGO_COLORS = ['#8e8e93', '#ff9f0a', '#0071e3'];  // 灰 / 橙 / 蓝
 
 let charts = {};
-let allModels = [];
 
 // ── 初始化：加载模型列表 ───────────────────────────────────────────────────
 
 async function initPage() {
   try {
     const data = await fetchJSON('/api/models');
-    allModels = data.models || [];
-    populateModelSelect();
+    const sel = document.getElementById('modelSelect');
+    data.models.forEach(m => {
+      const opt = document.createElement('option');
+      opt.value = m.name;
+      opt.textContent = `${m.model_type.toUpperCase()} ${m.grid_size}×${m.grid_size} — acc ${(m.accuracy*100).toFixed(1)}%`;
+      sel.appendChild(opt);
+    });
   } catch(e) {}
-
-  document.getElementById('gridSize').addEventListener('change', () => {
-    populateModelSelect();
-    updateModelHint();
-  });
-  document.getElementById('modelSelect').addEventListener('change', updateModelHint);
-}
-
-function populateModelSelect() {
-  const sel = document.getElementById('modelSelect');
-  const gridSize = parseInt(document.getElementById('gridSize').value);
-  const currentVal = sel.value;
-
-  sel.innerHTML = '<option value="">— 不使用（退化为XY）—</option>';
-
-  allModels.forEach(m => {
-    const opt = document.createElement('option');
-    opt.value = m.name;
-    opt.textContent = `${m.model_type.toUpperCase()} ${m.grid_size}×${m.grid_size} — acc ${(m.accuracy*100).toFixed(1)}%`;
-    if (m.grid_size !== gridSize) {
-      opt.disabled = true;
-      opt.textContent += ' ⚠ 不兼容';
-    }
-    sel.appendChild(opt);
-  });
-
-  sel.value = currentVal;
-  if (!sel.value) sel.selectedIndex = 0;
-
-  updateModelHint();
-}
-
-function updateModelHint() {
-  const sel = document.getElementById('modelSelect');
-  const gridSize = parseInt(document.getElementById('gridSize').value);
-  const noModelHint = document.getElementById('noModelHint');
-  const modelMismatchHint = document.getElementById('modelMismatchHint');
-
-  const selectedOpt = sel.options[sel.selectedIndex];
-  const hasModel = !!sel.value;
-  const isMismatch = hasModel && selectedOpt && selectedOpt.disabled;
-
-  noModelHint.classList.toggle('hidden', hasModel);
-  modelMismatchHint.classList.toggle('hidden', !isMismatch);
 }
 
 // ── 运行对比 ───────────────────────────────────────────────────────────────
@@ -74,7 +34,8 @@ async function runComparison() {
     model_name:      modelName,
   };
 
-  updateModelHint();
+  // 提示无模型
+  document.getElementById('noModelHint').classList.toggle('hidden', !!modelName);
 
   // UI 状态
   document.getElementById('cmpBtn').disabled   = true;
@@ -89,10 +50,6 @@ async function runComparison() {
     });
 
     if (!data.success) throw new Error('对比失败');
-
-    if (data.model_warning) {
-      showToast(data.model_warning, 'error', 6000);
-    }
 
     renderResults(data);
 

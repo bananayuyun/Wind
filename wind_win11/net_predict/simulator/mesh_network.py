@@ -81,7 +81,6 @@ class MeshNetwork:
     def __init__(self, size: int = 4, buffer_capacity: int = None) -> None:
         self.size = size
         self.buffer_capacity = buffer_capacity or SimConfig.BUFFER_CAPACITY
-        self.max_hops = max(SimConfig.MAX_HOPS, size * 4)
         self.cycle = 0
 
         # 网格，routers[x][y]
@@ -272,7 +271,7 @@ class MeshNetwork:
                 continue
 
             # 跳数超限（防死锁保护）
-            if pkt.hops >= self.max_hops:
+            if pkt.hops >= SimConfig.MAX_HOPS:
                 self.dropped += 1
                 continue
 

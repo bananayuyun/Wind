@@ -11,7 +11,7 @@ class SimConfig:
 
 class MLConfig:
     SEQ_LEN = 10                # 输入序列长度（过去 N 周期）
-    PRED_HORIZON = 5            # 预测未来 M 周期
+    PRED_HORIZON = 1            # 预测未来 M 周期
     HIDDEN_SIZE = 128           # LSTM 隐藏层维度
     NUM_LAYERS = 2              # LSTM 层数
     DROPOUT = 0.2

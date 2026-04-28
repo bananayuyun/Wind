@@ -98,12 +98,9 @@ def api_simulate():
         if os.path.exists(model_path):
             try:
                 ml_model, ckpt = _load_model(model_path)
-                model_n_nodes = ckpt.get('n_nodes', 0)
-                expected_n_nodes = grid_size * grid_size
-                if model_n_nodes != expected_n_nodes:
+                seq_len = ckpt.get('seq_len', MLConfig.SEQ_LEN)
+                if ckpt.get('grid_size') != grid_size:
                     ml_model = None
-                else:
-                    seq_len = ckpt.get('seq_len', MLConfig.SEQ_LEN)
             except Exception:
                 pass
 
@@ -221,53 +218,47 @@ def api_train_stream(session_id: str):
 
 @app.route('/api/compare', methods=['POST'])
 def api_compare():
-    data: Dict = request.json or {}
+    try:
+        data: Dict = request.json or {}
 
-    grid_size       = int(data.get('grid_size', 4))
-    traffic_pattern = data.get('traffic_pattern', 'hotspot')
-    num_cycles      = min(int(data.get('num_cycles', 500)), 1000)
-    injection_rate  = float(data.get('injection_rate', 0.3))
-    model_name      = data.get('model_name', '')
+        grid_size       = int(data.get('grid_size', 4))
+        traffic_pattern = data.get('traffic_pattern', 'hotspot')
+        num_cycles      = min(int(data.get('num_cycles', 500)), 1000)
+        injection_rate  = float(data.get('injection_rate', 0.3))
+        model_name      = data.get('model_name', '')
 
-    ml_model = None
-    seq_len = MLConfig.SEQ_LEN
-    model_warning = None
-    if model_name:
-        model_path = os.path.join(MLConfig.MODEL_DIR, model_name)
-        if os.path.exists(model_path):
-            try:
-                ml_model, ckpt = _load_model(model_path)
-                model_n_nodes = ckpt.get('n_nodes', 0)
-                expected_n_nodes = grid_size * grid_size
-                if model_n_nodes != expected_n_nodes:
-                    model_warning = (
-                        f"模型训练于 {model_n_nodes} 节点（{int(model_n_nodes**0.5)}×{int(model_n_nodes**0.5)}），"
-                        f"与当前 {grid_size}×{grid_size} 网格（{expected_n_nodes} 节点）不兼容，"
-                        f"ML自适应路由将退化为XY路由"
-                    )
-                    ml_model = None
-                else:
+        if grid_size == 8:
+            num_cycles = min(num_cycles, 500)
+
+        ml_model = None
+        seq_len = MLConfig.SEQ_LEN
+        if model_name:
+            model_path = os.path.join(MLConfig.MODEL_DIR, model_name)
+            if os.path.exists(model_path):
+                try:
+                    ml_model, ckpt = _load_model(model_path)
                     seq_len = ckpt.get('seq_len', MLConfig.SEQ_LEN)
-            except Exception:
-                pass
+                    if ckpt.get('grid_size') != grid_size:
+                        ml_model = None
+                except Exception:
+                    pass
 
-    algos = [
-        {'key': 'xy',           'name': 'XY路由'},
-        {'key': 'odd_even',     'name': '奇偶转弯'},
-        {'key': 'ml_adaptive',  'name': 'ML自适应'},
-    ]
+        algos = [
+            {'key': 'xy',           'name': 'XY路由'},
+            {'key': 'odd_even',     'name': '奇偶转弯'},
+            {'key': 'ml_adaptive',  'name': 'ML自适应'},
+        ]
 
-    results: Dict = {}
+        results: Dict = {}
 
-    for algo in algos:
-        key = algo['key']
-        net  = MeshNetwork(size=grid_size, buffer_capacity=SimConfig.BUFFER_CAPACITY)
-        tgen = TrafficGenerator(size=grid_size, seed=42)
+        for algo in algos:
+            key = algo['key']
+            net  = MeshNetwork(size=grid_size, buffer_capacity=SimConfig.BUFFER_CAPACITY)
+            tgen = TrafficGenerator(size=grid_size, seed=42)
 
-        seq_buf: list   = []
-        timeline: list  = []
+            seq_buf: list   = []
+            timeline: list  = []
 
-        try:
             for cycle in range(num_cycles):
                 pkts = tgen.get_packets(traffic_pattern, injection_rate)
                 for src, dst in pkts:
@@ -292,58 +283,40 @@ def api_compare():
                         'avg_utilization': m['avg_utilization'],
                         'hotspot_count': m['hotspot_count'],
                     })
-        except Exception:
-            if key == 'ml_adaptive' and not timeline:
-                net  = MeshNetwork(size=grid_size, buffer_capacity=SimConfig.BUFFER_CAPACITY)
-                tgen2 = TrafficGenerator(size=grid_size, seed=42)
-                for cycle in range(num_cycles):
-                    pkts = tgen2.get_packets(traffic_pattern, injection_rate)
-                    for src, dst in pkts:
-                        net.inject_packet(src, dst)
-                    state = net.step('xy', None)
-                    seq_buf.append(state.tolist())
-                    if (cycle + 1) % 20 == 0:
-                        m = net.get_metrics()
-                        timeline.append({
-                            'cycle': cycle + 1,
-                            'throughput': m['throughput'],
-                            'avg_latency': m['avg_latency'],
-                            'avg_utilization': m['avg_utilization'],
-                            'hotspot_count': m['hotspot_count'],
-                        })
 
-        results[key] = {
-            'name': algo['name'],
-            'metrics': net.get_metrics(),
-            'timeline': timeline,
+            results[key] = {
+                'name': algo['name'],
+                'metrics': net.get_metrics(),
+                'timeline': timeline,
+            }
+
+        metric_keys = ['avg_latency', 'throughput', 'avg_utilization', 'hotspot_count', 'power_mw']
+        comparison = {
+            'algorithms': [a['name'] for a in algos],
+            'metrics': {
+                mk: [results[a['key']]['metrics'].get(mk, 0) for a in algos]
+                for mk in metric_keys
+            },
+            'timeline': {
+                'cycles': [t['cycle'] for t in results['xy']['timeline']],
+                **{
+                    results[a['key']]['name']: [t['throughput'] for t in results[a['key']]['timeline']]
+                    for a in algos
+                },
+            },
+            'details': {
+                k: {
+                    'name': v['name'],
+                    'metrics': v['metrics'],
+                }
+                for k, v in results.items()
+            },
+            'ml_available': ml_model is not None,
         }
 
-    metric_keys = ['avg_latency', 'throughput', 'avg_utilization', 'hotspot_count', 'power_mw']
-    comparison = {
-        'algorithms': [a['name'] for a in algos],
-        'metrics': {
-            mk: [results[a['key']]['metrics'].get(mk, 0) for a in algos]
-            for mk in metric_keys
-        },
-        'timeline': {
-            'cycles': [t['cycle'] for t in results['xy']['timeline']],
-            **{
-                results[a['key']]['name']: [t['throughput'] for t in results[a['key']]['timeline']]
-                for a in algos
-            },
-        },
-        'details': {
-            k: {
-                'name': v['name'],
-                'metrics': v['metrics'],
-            }
-            for k, v in results.items()
-        },
-        'ml_available': ml_model is not None,
-        'model_warning': model_warning,
-    }
-
-    return jsonify({'success': True, **comparison})
+        return jsonify({'success': True, **comparison})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 # ══════════════════════════════════════════════════════════════════════════════

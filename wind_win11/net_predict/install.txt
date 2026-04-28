@@ -17,6 +17,9 @@ pip install flask numpy scikit-learn
 【2. 启动应用】
 
 cd /path/to/net_predict
+
+source venv/bin/activate
+
 python app.py
 
 # 或指定端口
