@@ -1,0 +1,64 @@
+==============================================================
+  NoC 热点预测系统 — WSL 安装与启动指南
+==============================================================
+
+【1. 安装 Python 依赖（WSL/Ubuntu）】
+
+# 基础依赖
+pip install flask numpy scikit-learn
+
+# PyTorch CPU 版（约 200MB，比 GPU 版小很多）
+pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+# 一次性全部安装（自动跳过 PyTorch，需单独装）
+pip install flask numpy scikit-learn
+
+
+【2. 启动应用】
+
+cd /path/to/net_predict
+python app.py
+
+# 或指定端口
+python -c "from app import app; app.run(host='0.0.0.0', port=5000, threaded=True)"
+
+
+【3. 访问】
+
+从 Windows 浏览器访问（WSL2 会自动映射端口）：
+  http://localhost:5000
+
+如果 localhost 不通，查看 WSL 的 IP：
+  ip addr show eth0
+然后访问 http://<WSL_IP>:5000
+
+
+【4. 使用流程】
+
+① 打开「网络仿真」页面
+   - 选择流量模式（推荐「热点流量」）
+   - 选注入率 0.2，周期 300
+   - 点击「运行仿真」，观察 Canvas 实时着色
+
+② 打开「模型训练」页面
+   - 选 4×4 LSTM，Epochs 50
+   - 点击「开始训练」，观察 loss 曲线实时更新
+   - 训练约 2–5 分钟完成
+
+③ 打开「算法对比」页面
+   - 选择已训练的 LSTM 模型
+   - 流量模式选「热点流量」，注入率 0.2
+   - 点击「开始对比」，查看三种算法的指标对比
+
+
+【5. 常见问题】
+
+Q: ImportError: No module named 'torch'
+A: pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+Q: address already in use
+A: lsof -ti:5000 | xargs kill -9
+
+Q: WSL 无法访问 localhost
+A: netsh interface portproxy add v4tov4 listenport=5000 listenaddress=0.0.0.0 connectport=5000 connectaddress=$(wsl hostname -I)
+==============================================================

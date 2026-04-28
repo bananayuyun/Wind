@@ -1,0 +1,162 @@
+{% extends "base.html" %}
+{% block title %}NoC 热点预测 — 总览{% endblock %}
+
+{% block content %}
+<!-- 英雄区 -->
+<div class="hero">
+  <div class="hero-tag">研究展示系统</div>
+  <h1 class="hero-title">基于机器学习的<br>片上网络热点预测</h1>
+  <p class="hero-subtitle">
+    利用 LSTM 神经网络预测 Mesh NoC 中各路由器节点成为热点的概率，
+    实现动态路由优化，显著降低平均延迟、提升网络吞吐量。
+  </p>
+  <div class="flex items-center justify-center gap-12">
+    <a href="/simulation" class="btn btn-primary btn-lg">开始仿真</a>
+    <a href="/comparison" class="btn btn-secondary btn-lg">查看对比</a>
+  </div>
+</div>
+
+<!-- 功能入口 -->
+<div class="feature-grid">
+  <a href="/simulation" class="feature-card">
+    <div class="feature-icon">📡</div>
+    <div class="feature-title">网络仿真</div>
+    <div class="feature-desc">
+      配置 4×4 / 8×8 Mesh 网络，选择流量模式与路由算法，
+      实时可视化每个节点的缓冲区利用率与热点分布。
+    </div>
+  </a>
+  <a href="/training" class="feature-card">
+    <div class="feature-icon">🧠</div>
+    <div class="feature-title">模型训练</div>
+    <div class="feature-desc">
+      训练 LSTM / MLP 热点预测模型，实时查看 loss 与 accuracy 曲线，
+      模型训练完成后可用于自适应路由。
+    </div>
+  </a>
+  <a href="/comparison" class="feature-card">
+    <div class="feature-icon">📊</div>
+    <div class="feature-title">算法对比</div>
+    <div class="feature-desc">
+      并行运行 XY路由、奇偶转弯模型、ML自适应路由，
+      对比延迟、吞吐量、缓冲利用率等关键指标。
+    </div>
+  </a>
+</div>
+
+<!-- 方法论卡片 -->
+<h2 style="font-size:18px;font-weight:600;margin-bottom:16px;">系统架构</h2>
+<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:32px;">
+  <div class="card card-body">
+    <div style="font-size:22px;margin-bottom:8px;">🔁</div>
+    <div class="card-title">NoC 仿真器</div>
+    <div class="card-desc">Python 离散事件仿真，逐周期模拟包的注入、路由、缓冲，支持背压机制</div>
+  </div>
+  <div class="card card-body">
+    <div style="font-size:22px;margin-bottom:8px;">🌐</div>
+    <div class="card-title">流量模式</div>
+    <div class="card-desc">均匀随机、热点集中、转置、位翻转四种流量，模拟真实工作负载</div>
+  </div>
+  <div class="card card-body">
+    <div style="font-size:22px;margin-bottom:8px;">📈</div>
+    <div class="card-title">LSTM 预测</div>
+    <div class="card-desc">输入过去 10 周期全网状态，输出各节点未来 5 周期内成为热点的概率</div>
+  </div>
+  <div class="card card-body">
+    <div style="font-size:22px;margin-bottom:8px;">🗺️</div>
+    <div class="card-title">自适应路由</div>
+    <div class="card-desc">综合缓冲利用率与热点预测概率打分，引导数据包绕开潜在拥塞节点</div>
+  </div>
+</div>
+
+<!-- 算法简介 -->
+<h2 style="font-size:18px;font-weight:600;margin-bottom:16px;">路由算法原理</h2>
+<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:32px;">
+  <div class="card card-body">
+    <div class="flex items-center gap-8 mb-8">
+      <span class="tag tag-gray">传统</span>
+      <span class="card-title" style="margin:0;">XY 路由</span>
+    </div>
+    <div class="card-desc">
+      确定性路由，先沿 X 方向移动至目标列，再沿 Y 方向移动至目标行。
+      简单高效，但对负载不均衡敏感，热点节点无法绕行。
+    </div>
+  </div>
+  <div class="card card-body">
+    <div class="flex items-center gap-8 mb-8">
+      <span class="tag tag-orange">自适应</span>
+      <span class="card-title" style="margin:0;">奇偶转弯模型</span>
+    </div>
+    <div class="card-desc">
+      无死锁自适应路由：偶列禁止 N/S→E 转弯，奇列禁止 E/W→W 转弯。
+      可利用缓冲信息选择负载更轻的路径，部分改善拥塞。
+    </div>
+  </div>
+  <div class="card card-body">
+    <div class="flex items-center gap-8 mb-8">
+      <span class="tag tag-blue">ML驱动</span>
+      <span class="card-title" style="margin:0;">ML 自适应路由</span>
+    </div>
+    <div class="card-desc">
+      基于 LSTM 预测，在热点形成前主动引导流量绕行。
+      评分 = 当前缓冲利用率×0.4 + 热点预测概率×0.6，选最优邻居。
+    </div>
+  </div>
+</div>
+
+<!-- 系统状态 -->
+<h2 style="font-size:18px;font-weight:600;margin-bottom:16px;">模型状态</h2>
+<div id="modelStatus" class="card card-body">
+  <div class="flex items-center gap-8 text-sec">
+    <div class="spinner"></div>
+    <span>正在加载模型列表...</span>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// 加载模型状态
+async function loadModelStatus() {
+  try {
+    const data = await fetchJSON('/api/models');
+    const el = document.getElementById('modelStatus');
+    if (!data.models || data.models.length === 0) {
+      el.innerHTML = `
+        <div class="flex items-center gap-12">
+          <span style="font-size:24px;">💡</span>
+          <div>
+            <div style="font-weight:600;margin-bottom:2px;">尚未训练模型</div>
+            <div class="text-sec text-sm">前往 <a href="/training" style="color:var(--accent);">模型训练</a> 页面训练 LSTM 模型，即可启用 ML 自适应路由</div>
+          </div>
+        </div>`;
+      return;
+    }
+    const rows = data.models.map(m => `
+      <tr>
+        <td>${m.name}</td>
+        <td><span class="tag ${m.model_type === 'lstm' ? 'tag-blue' : 'tag-gray'}">${m.model_type.toUpperCase()}</span></td>
+        <td>${m.grid_size}×${m.grid_size}</td>
+        <td class="${m.accuracy >= 0.85 ? 'best' : ''}">${(m.accuracy * 100).toFixed(1)}%</td>
+        <td>${m.val_loss.toFixed(4)}</td>
+      </tr>`).join('');
+    el.innerHTML = `
+      <div class="flex items-center justify-between mb-16">
+        <span style="font-weight:600;">已训练模型 <span class="tag tag-blue">${data.models.length}</span></span>
+      </div>
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead><tr>
+            <th>文件名</th><th>类型</th><th>网格</th><th>准确率</th><th>验证Loss</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+  } catch(e) {
+    document.getElementById('modelStatus').innerHTML =
+      '<span class="text-sec">模型列表加载失败</span>';
+  }
+}
+loadModelStatus();
+</script>
+{% endblock %}

@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+{% block title %}算法对比 — NoC 热点预测{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">算法性能对比</h1>
+  <p class="page-subtitle">并行运行 XY路由、奇偶转弯、ML自适应，对比延迟、吞吐量等关键指标</p>
+</div>
+
+<!-- 配置栏 -->
+<div class="compare-config">
+  <div class="form-group">
+    <label class="form-label">网格规模</label>
+    <select class="form-control" id="gridSize">
+      <option value="4" selected>4×4</option>
+      <option value="8">8×8</option>
+    </select>
+  </div>
+  <div class="form-group">
+    <label class="form-label">流量模式</label>
+    <select class="form-control" id="trafficPattern">
+      <option value="hotspot" selected>热点流量</option>
+      <option value="uniform">均匀随机</option>
+      <option value="transpose">转置</option>
+      <option value="bit_complement">位翻转</option>
+    </select>
+  </div>
+  <div class="form-group">
+    <label class="form-label">仿真周期</label>
+    <select class="form-control" id="numCycles">
+      <option value="300">300</option>
+      <option value="500" selected>500</option>
+      <option value="800">800</option>
+      <option value="1000">1000</option>
+    </select>
+  </div>
+  <div class="form-group">
+    <label class="form-label">注入率</label>
+    <select class="form-control" id="injRate">
+      <option value="0.01">0.01</option>
+      <option value="0.02">0.02</option>
+      <option value="0.05">0.05</option>
+      <option value="0.1">0.10</option>
+      <option value="0.15">0.15</option>
+      <option value="0.2">0.20</option>
+      <option value="0.3" selected>0.30</option>
+      <option value="0.4">0.40</option>
+      <option value="0.5">0.50</option>
+    </select>
+  </div>
+  <div class="form-group">
+    <label class="form-label">ML 模型</label>
+    <select class="form-control" id="modelSelect">
+      <option value="">— 不使用（退化为XY）—</option>
+    </select>
+  </div>
+  <button class="btn btn-primary" id="cmpBtn" onclick="runComparison()">
+    ▶ 开始对比
+  </button>
+</div>
+
+<!-- 无ML模型提示 -->
+<div id="noModelHint" class="hidden" style="margin-bottom:16px;">
+  <div class="card card-body" style="background:var(--accent-light);border-color:var(--accent);">
+    <span style="color:var(--accent);">💡 未选择 ML 模型，"ML 自适应"路由将退化为 XY 路由。
+    <a href="/training" style="color:var(--accent);font-weight:600;">前往训练页面</a> 训练模型以查看完整对比。</span>
+  </div>
+</div>
+
+<!-- 模型不兼容提示 -->
+<div id="modelMismatchHint" class="hidden" style="margin-bottom:16px;">
+  <div class="card card-body" style="background:#fff5e5;border-color:var(--warning);">
+    <span style="color:#b25a00;">⚠️ 所选模型与当前网格规模不兼容，"ML 自适应"路由将退化为 XY 路由。
+    请训练与当前网格规模匹配的模型，或选择"不使用"选项。</span>
+  </div>
+</div>
+
+<!-- 加载中 -->
+<div id="loadingState" class="hidden text-center" style="padding:48px;">
+  <div class="spinner" style="width:32px;height:32px;margin:0 auto 16px;"></div>
+  <div class="text-sec">正在并行运行三种算法，请稍候...</div>
+</div>
+
+<!-- 结果区 -->
+<div id="resultsSection" class="hidden">
+
+  <!-- 汇总表格 -->
+  <div class="card mb-20">
+    <div class="card-body" style="border-bottom:1px solid var(--border);">
+      <span style="font-size:15px;font-weight:600;">对比汇总</span>
+    </div>
+    <div class="table-wrap" style="border-radius:0 0 10px 10px;border:none;">
+      <table class="data-table" id="summaryTable">
+        <thead>
+          <tr>
+            <th>路由算法</th>
+            <th>平均延迟 (cycles) ↓</th>
+            <th>吞吐量 (pkts/cycle) ↑</th>
+            <th>平均缓冲利用率 ↓</th>
+            <th>热点节点数 ↓</th>
+            <th>功耗 (mW) ↓</th>
+            <th>已交付包</th>
+            <th>丢包数</th>
+          </tr>
+        </thead>
+        <tbody id="summaryBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- 5 个指标柱状图（2x2 + 1 独立） -->
+  <div class="charts-2x2">
+    <div class="chart-wrap">
+      <div class="chart-title">平均延迟（cycles）— 越低越好</div>
+      <canvas id="chartLatency"></canvas>
+    </div>
+    <div class="chart-wrap">
+      <div class="chart-title">吞吐量（pkts/cycle）— 越高越好</div>
+      <canvas id="chartThroughput"></canvas>
+    </div>
+    <div class="chart-wrap">
+      <div class="chart-title">平均缓冲利用率 — 越低越好</div>
+      <canvas id="chartUtil"></canvas>
+    </div>
+    <div class="chart-wrap">
+      <div class="chart-title">热点节点数 — 越低越好</div>
+      <canvas id="chartHotspot"></canvas>
+    </div>
+  </div>
+
+  <!-- 功耗柱状图（独占一行，更显眼） -->
+  <div class="chart-wrap">
+    <div class="chart-title">估算功耗（mW）— 越低越好&nbsp;<span style="font-size:12px;color:var(--text-sec);font-weight:400;">基于 Orion 2.0 模型：P = 0.6×flit_hops/cycle + 0.5×n_routers</span></div>
+    <canvas id="chartPower" height="80"></canvas>
+  </div>
+
+  <!-- 吞吐量时序图 -->
+  <div class="chart-wrap">
+    <div class="chart-title">吞吐量随时间变化（三种算法对比）</div>
+    <canvas id="chartTimeline" height="120"></canvas>
+  </div>
+
+</div>
+
+<!-- 空状态 -->
+<div id="emptyState" style="text-align:center;padding:64px;color:var(--text-sec);">
+  <div style="font-size:48px;margin-bottom:12px;">📊</div>
+  <div style="font-size:16px;font-weight:500;">配置参数后点击「开始对比」</div>
+  <div style="font-size:14px;margin-top:8px;">系统将并行运行三种路由算法并展示对比结果</div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/comparison.js') }}"></script>
+{% endblock %}

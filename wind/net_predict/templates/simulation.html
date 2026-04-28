@@ -1,0 +1,336 @@
+{% extends "base.html" %}
+{% block title %}网络仿真 — NoC 热点预测{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">网络仿真</h1>
+  <p class="page-subtitle">配置 Mesh 网络参数，运行仿真并可视化各节点缓冲区状态与热点分布</p>
+</div>
+
+<div class="sim-layout">
+
+  <!-- 左侧控制面板 -->
+  <div class="card card-body" style="position:sticky;top:68px;">
+    <div style="font-size:15px;font-weight:600;margin-bottom:16px;">仿真参数</div>
+
+    <div class="form-group">
+      <label class="form-label">网格规模</label>
+      <select class="form-control" id="gridSize">
+        <option value="4" selected>4×4（16 节点）</option>
+        <option value="8">8×8（64 节点）</option>
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">流量模式</label>
+      <select class="form-control" id="trafficPattern">
+        <option value="hotspot" selected>热点流量（Hotspot）</option>
+        <option value="uniform">均匀随机（Uniform）</option>
+        <option value="transpose">转置（Transpose）</option>
+        <option value="bit_complement">位翻转（Bit-Complement）</option>
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">路由算法</label>
+      <select class="form-control" id="routingAlgo">
+        <option value="xy" selected>XY 路由</option>
+        <option value="odd_even">奇偶转弯模型</option>
+        <option value="ml_adaptive">ML 自适应路由</option>
+      </select>
+    </div>
+
+    <div id="modelSelectWrap" class="form-group hidden">
+      <label class="form-label">选择预测模型</label>
+      <select class="form-control" id="modelSelect">
+        <option value="">— 加载中 —</option>
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">注入率 <span id="rateVal">0.30</span></label>
+      <input type="range" id="injectionRate" min="0.05" max="0.70" step="0.05" value="0.30" />
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">仿真周期数 <span id="cycleVal">300</span></label>
+      <input type="range" id="numCycles" min="100" max="1000" step="50" value="300" />
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">回放速度 <span id="speedVal">20 fps</span></label>
+      <input type="range" id="playSpeed" min="5" max="60" step="5" value="20" />
+    </div>
+
+    <button class="btn btn-primary w-full" id="runBtn" onclick="runSim()">
+      ▶ 运行仿真
+    </button>
+
+    <hr class="divider" />
+
+    <!-- 图例 -->
+    <div style="font-size:12px;color:var(--text-sec);margin-bottom:8px;">节点颜色图例</div>
+    <div class="flex flex-col gap-8" style="font-size:12px;">
+      <div class="flex items-center gap-8">
+        <div style="width:14px;height:14px;border-radius:50%;background:#34c759;"></div>
+        <span>低利用率（&lt; 50%）</span>
+      </div>
+      <div class="flex items-center gap-8">
+        <div style="width:14px;height:14px;border-radius:50%;background:#ff9f0a;"></div>
+        <span>中利用率（50–80%）</span>
+      </div>
+      <div class="flex items-center gap-8">
+        <div style="width:14px;height:14px;border-radius:50%;background:#ff3b30;"></div>
+        <span>热点节点（&gt; 80%）</span>
+      </div>
+      <div class="flex items-center gap-8">
+        <div style="width:14px;height:14px;border-radius:50%;background:rgba(0,113,227,0.3);border:1px solid #0071e3;"></div>
+        <span>蓝色光晕：ML 预测热点</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 中间可视化区 -->
+  <div class="sim-canvas-wrap">
+    <div class="flex items-center justify-between w-full">
+      <span style="font-size:14px;font-weight:600;">网络拓扑实时状态</span>
+      <span id="algoLabel" class="tag tag-gray">XY 路由</span>
+    </div>
+
+    <!-- Canvas -->
+    <canvas id="networkCanvas" width="500" height="500"></canvas>
+
+    <!-- 播放控制 -->
+    <div class="playback-controls">
+      <button class="btn btn-secondary btn-sm" id="resetBtn" onclick="viz.reset()" disabled>⏮</button>
+      <button class="btn btn-secondary btn-sm" id="playBtn"  onclick="togglePlay()" disabled>▶</button>
+      <input type="range" id="frameSlider" min="0" max="100" value="0"
+             style="flex:1;" oninput="viz.seek(+this.value)" disabled />
+      <span class="frame-info" id="frameInfo">— / —</span>
+    </div>
+  </div>
+
+  <!-- 右侧指标 -->
+  <div class="metrics-panel">
+    <div class="metric-card">
+      <div class="metric-label">平均延迟</div>
+      <div class="metric-value" id="m_latency">—<span class="metric-unit">cycles</span></div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">吞吐量</div>
+      <div class="metric-value" id="m_throughput">—<span class="metric-unit">pkts/cycle</span></div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">平均缓冲利用率</div>
+      <div class="metric-value" id="m_util">—<span class="metric-unit">%</span></div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">热点节点数</div>
+      <div class="metric-value metric-hot" id="m_hotspot">—</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">已交付包</div>
+      <div class="metric-value" id="m_delivered">—</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">丢包数</div>
+      <div class="metric-value" id="m_dropped">—</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">当前周期</div>
+      <div class="metric-value" id="m_cycle">—</div>
+    </div>
+  </div>
+</div>
+
+<!-- 包路径展示 -->
+<div id="tracesSection" class="mt-24 hidden">
+  <h2 style="font-size:16px;font-weight:600;margin-bottom:12px;">数据包路径采样（前 30 条）</h2>
+  <div class="table-wrap">
+    <table class="data-table" id="tracesTable">
+      <thead>
+        <tr><th>源节点</th><th>目标节点</th><th>路径</th><th>延迟(cycles)</th><th>跳数</th></tr>
+      </thead>
+      <tbody id="tracesTbody"></tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/simulation.js') }}"></script>
+<script>
+// 绑定滑块显示
+document.getElementById('injectionRate').addEventListener('input', function() {
+  document.getElementById('rateVal').textContent = parseFloat(this.value).toFixed(2);
+});
+document.getElementById('numCycles').addEventListener('input', function() {
+  document.getElementById('cycleVal').textContent = this.value;
+});
+document.getElementById('playSpeed').addEventListener('input', function() {
+  document.getElementById('speedVal').textContent = this.value + ' fps';
+  if (viz) viz.setSpeed(+this.value);
+});
+
+// ML路由算法时显示模型选择
+document.getElementById('routingAlgo').addEventListener('change', function() {
+  const wrap = document.getElementById('modelSelectWrap');
+  wrap.classList.toggle('hidden', this.value !== 'ml_adaptive');
+  document.getElementById('algoLabel').textContent =
+    this.options[this.selectedIndex].text;
+  document.getElementById('algoLabel').className =
+    'tag ' + (this.value === 'ml_adaptive' ? 'tag-blue' : this.value === 'odd_even' ? 'tag-orange' : 'tag-gray');
+});
+
+// 加载模型列表
+async function loadModels() {
+  try {
+    const data = await fetchJSON('/api/models');
+    const sel = document.getElementById('modelSelect');
+    sel.innerHTML = '';
+    if (!data.models.length) {
+      sel.innerHTML = '<option value="">— 暂无已训练模型 —</option>';
+      return;
+    }
+    const gs = parseInt(document.getElementById('gridSize').value);
+    data.models
+      .filter(m => m.grid_size === gs)
+      .forEach(m => {
+        const opt = document.createElement('option');
+        opt.value = m.name;
+        opt.textContent = `${m.model_type.toUpperCase()} ${m.grid_size}x${m.grid_size} — acc ${(m.accuracy*100).toFixed(1)}%`;
+        sel.appendChild(opt);
+      });
+    if (!sel.options.length) sel.innerHTML = '<option value="">— 无匹配模型 —</option>';
+  } catch(e) {}
+}
+loadModels();
+document.getElementById('gridSize').addEventListener('change', loadModels);
+
+let viz = new NetworkViz('networkCanvas', 4);
+let isPlaying = false;
+
+// 默认仅更新进度条，runSim 拿到数据后会替换为带指标更新的版本
+viz.onFrameChange = (frame, total) => {
+  document.getElementById('frameSlider').value = frame;
+  document.getElementById('frameInfo').textContent = `${frame + 1} / ${total}`;
+};
+viz.onPlayEnd = () => {
+  isPlaying = false;
+  document.getElementById('playBtn').textContent = '▶';
+};
+
+function togglePlay() {
+  if (isPlaying) {
+    viz.pause();
+    isPlaying = false;
+    document.getElementById('playBtn').textContent = '▶';
+  } else {
+    viz.play();
+    isPlaying = true;
+    document.getElementById('playBtn').textContent = '⏸';
+  }
+}
+
+async function runSim() {
+  const btn = document.getElementById('runBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<div class="spinner" style="width:16px;height:16px;"></div> 仿真中...';
+
+  const gridSize = parseInt(document.getElementById('gridSize').value);
+  viz.gridSize = gridSize;
+  viz.resize();
+
+  const params = {
+    grid_size: gridSize,
+    traffic_pattern: document.getElementById('trafficPattern').value,
+    routing_algorithm: document.getElementById('routingAlgo').value,
+    injection_rate: parseFloat(document.getElementById('injectionRate').value),
+    num_cycles: parseInt(document.getElementById('numCycles').value),
+    model_name: document.getElementById('modelSelect').value || '',
+  };
+
+  try {
+    const data = await fetchJSON('/api/simulate', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    });
+
+    if (!data.success) throw new Error('仿真失败');
+
+    // 把 timeline 绑定进闭包，onFrameChange 直接引用局部常量，无外部依赖
+    const timeline = data.metrics_timeline || [];
+    const finalMetrics = data.metrics;
+
+    function applyMetrics(m) {
+      document.getElementById('m_latency').innerHTML    = `${m.avg_latency}<span class="metric-unit">cycles</span>`;
+      document.getElementById('m_throughput').innerHTML  = `${m.throughput}<span class="metric-unit">pkts/cycle</span>`;
+      document.getElementById('m_util').innerHTML        = `${(m.avg_utilization * 100).toFixed(1)}<span class="metric-unit">%</span>`;
+      document.getElementById('m_hotspot').textContent   = m.hotspot_count;
+      document.getElementById('m_delivered').textContent = m.delivered;
+      document.getElementById('m_dropped').textContent   = m.dropped;
+      document.getElementById('m_cycle').textContent     = m.cycle;
+    }
+
+    // 替换 onFrameChange：随帧同步更新指标
+    viz.onFrameChange = (frame, total) => {
+      document.getElementById('frameSlider').value = frame;
+      document.getElementById('frameInfo').textContent = `${frame + 1} / ${total}`;
+      if (timeline.length === 0) return;
+      const currentCycle = frame + 1;
+      let entry = timeline[0];
+      for (const e of timeline) {
+        if (e.cycle <= currentCycle) entry = e;
+        else break;
+      }
+      applyMetrics(entry);
+    };
+    // 播放结束后恢复最终指标
+    viz.onPlayEnd = () => {
+      isPlaying = false;
+      document.getElementById('playBtn').textContent = '▶';
+      applyMetrics(finalMetrics);
+    };
+
+    applyMetrics(finalMetrics);   // 先显示最终值，播放后逐帧替换
+
+    // 启动可视化
+    viz.loadData(data.state_history, data.hotspot_predictions);
+    const slider = document.getElementById('frameSlider');
+    slider.max = data.state_history.length - 1;
+    slider.value = 0;
+    slider.disabled = false;
+    document.getElementById('playBtn').disabled  = false;
+    document.getElementById('resetBtn').disabled = false;
+
+    // 自动播放
+    isPlaying = true;
+    document.getElementById('playBtn').textContent = '⏸';
+    viz.setSpeed(parseInt(document.getElementById('playSpeed').value));
+    viz.play();
+
+    // 包路径
+    if (data.packet_traces.length) {
+      const tbody = document.getElementById('tracesTbody');
+      tbody.innerHTML = data.packet_traces.map(t =>
+        `<tr>
+          <td>(${t.src[0]},${t.src[1]})</td>
+          <td>(${t.dst[0]},${t.dst[1]})</td>
+          <td style="font-size:12px;font-family:monospace;">${t.path.map(p => `(${p[0]},${p[1]})`).join(' → ')}</td>
+          <td>${t.latency}</td>
+          <td>${t.hops}</td>
+        </tr>`
+      ).join('');
+      document.getElementById('tracesSection').classList.remove('hidden');
+    }
+
+    showToast('仿真完成！', 'success');
+  } catch(e) {
+    showToast('仿真出错: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '▶ 运行仿真';
+  }
+}
+</script>
+{% endblock %}

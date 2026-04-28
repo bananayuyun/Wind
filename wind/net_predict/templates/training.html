@@ -1,0 +1,168 @@
+{% extends "base.html" %}
+{% block title %}模型训练 — NoC 热点预测{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">模型训练</h1>
+  <p class="page-subtitle">训练 LSTM / MLP 热点预测模型，实时查看训练进度</p>
+</div>
+
+<div class="train-layout">
+
+  <!-- 左侧配置面板 -->
+  <div>
+    <div class="card card-body" style="position:sticky;top:68px;">
+      <div style="font-size:15px;font-weight:600;margin-bottom:16px;">训练配置</div>
+
+      <div class="form-group">
+        <label class="form-label">网格规模</label>
+        <select class="form-control" id="gridSize">
+          <option value="4" selected>4×4（16 节点，较快）</option>
+          <option value="8">8×8（64 节点，较慢）</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">模型类型</label>
+        <select class="form-control" id="modelType">
+          <option value="lstm" selected>LSTM（推荐，时序建模能力强）</option>
+          <option value="mlp">MLP（基线，速度更快）</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">训练轮次 (Epochs) <span id="epochsVal">50</span></label>
+        <input type="range" class="w-full" id="epochs" min="10" max="150" step="10" value="50"
+               oninput="document.getElementById('epochsVal').textContent=this.value" />
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">学习率</label>
+        <select class="form-control" id="lr">
+          <option value="0.01">0.01</option>
+          <option value="0.001" selected>0.001（推荐）</option>
+          <option value="0.0001">0.0001</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Batch Size</label>
+        <select class="form-control" id="batchSize">
+          <option value="32">32</option>
+          <option value="64" selected>64（推荐）</option>
+          <option value="128">128</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">流量模式（多选）</label>
+        <div style="display:flex;flex-direction:column;gap:6px;margin-top:4px;">
+          <label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer;">
+            <input type="checkbox" value="uniform"    checked id="p_uniform" />
+            均匀随机
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer;">
+            <input type="checkbox" value="hotspot"    checked id="p_hotspot" />
+            热点流量
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer;">
+            <input type="checkbox" value="transpose"  checked id="p_transpose" />
+            转置
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer;">
+            <input type="checkbox" value="bit_complement" id="p_bit" />
+            位翻转
+          </label>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">每种模式仿真周期 <span id="cyclesVal">1000</span></label>
+        <input type="range" class="w-full" id="nCycles" min="500" max="3000" step="250" value="1000"
+               oninput="document.getElementById('cyclesVal').textContent=this.value" />
+      </div>
+
+      <button class="btn btn-primary w-full" id="trainBtn" onclick="startTraining()">
+        🚀 开始训练
+      </button>
+      <button class="btn btn-secondary w-full mt-8 hidden" id="stopBtn" onclick="stopTraining()">
+        ⏹ 停止
+      </button>
+
+      <hr class="divider" />
+
+      <!-- 进度 -->
+      <div id="progressSection" class="hidden">
+        <div class="flex justify-between mb-4" style="font-size:12px;">
+          <span id="progressLabel" class="text-sec">Epoch 0 / 50</span>
+          <span id="progressPct" style="font-weight:600;">0%</span>
+        </div>
+        <div class="progress-bar-wrap">
+          <div class="progress-bar-fill" id="progressBar" style="width:0%;"></div>
+        </div>
+        <div class="flex justify-between mt-8" style="font-size:12px;color:var(--text-sec);">
+          <span>Loss: <b id="curLoss">—</b></span>
+          <span>Val Loss: <b id="curValLoss">—</b></span>
+          <span>Acc: <b id="curAcc">—</b></span>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- 右侧图表 + 日志 -->
+  <div>
+    <div class="chart-grid-1">
+
+      <!-- Loss 曲线 -->
+      <div class="chart-wrap">
+        <div class="chart-title">训练损失（BCELoss）</div>
+        <canvas id="lossChart" height="200"></canvas>
+      </div>
+
+      <!-- Accuracy 曲线 -->
+      <div class="chart-wrap">
+        <div class="chart-title">验证准确率</div>
+        <canvas id="accChart" height="200"></canvas>
+      </div>
+
+      <!-- 日志 -->
+      <div class="chart-wrap">
+        <div class="chart-title">训练日志</div>
+        <div class="log-box" id="logBox">等待开始训练...</div>
+      </div>
+
+    </div>
+
+    <!-- 训练完成卡片 -->
+    <div id="completeCard" class="card card-body mt-16 hidden">
+      <div class="flex items-center gap-12">
+        <span style="font-size:32px;">✅</span>
+        <div>
+          <div style="font-size:16px;font-weight:600;margin-bottom:4px;">训练完成！</div>
+          <div class="text-sec text-sm" id="completeMsg"></div>
+        </div>
+        <a href="/simulation" class="btn btn-primary" style="margin-left:auto;">
+          前往仿真页使用模型 →
+        </a>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- 已训练模型列表 -->
+<div class="mt-24">
+  <div class="flex items-center justify-between mb-12">
+    <h2 style="font-size:16px;font-weight:600;">已训练模型</h2>
+    <button class="btn btn-secondary btn-sm" onclick="loadModelList()">🔄 刷新</button>
+  </div>
+  <div id="modelList" class="card card-body">
+    <span class="text-sec">正在加载...</span>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/training.js') }}"></script>
+{% endblock %}

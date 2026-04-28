@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{% block title %}NoC 热点预测{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}" />
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  {% block head %}{% endblock %}
+</head>
+<body>
+
+<!-- 导航栏 -->
+<nav class="navbar">
+  <div class="nav-inner">
+    <a class="nav-brand" href="/">🔬 NoC 热点预测</a>
+    <div class="nav-links">
+      <a href="/"           class="nav-link {% if request.path == '/' %}active{% endif %}">总览</a>
+      <a href="/simulation" class="nav-link {% if request.path == '/simulation' %}active{% endif %}">网络仿真</a>
+      <a href="/training"   class="nav-link {% if request.path == '/training' %}active{% endif %}">模型训练</a>
+      <a href="/comparison" class="nav-link {% if request.path == '/comparison' %}active{% endif %}">算法对比</a>
+    </div>
+  </div>
+</nav>
+
+<!-- Toast 容器 -->
+<div class="toast-container" id="toastContainer"></div>
+
+<!-- 主内容 -->
+<main class="page-main">
+  {% block content %}{% endblock %}
+</main>
+
+<!-- 全局工具脚本 -->
+<script>
+function showToast(message, type = 'info', duration = 3500) {
+  const container = document.getElementById('toastContainer');
+  const el = document.createElement('div');
+  el.className = `toast toast-${type}`;
+  el.textContent = message;
+  container.appendChild(el);
+  setTimeout(() => el.remove(), duration);
+}
+
+async function fetchJSON(url, options = {}) {
+  const r = await fetch(url, {
+    headers: { 'Content-Type': 'application/json' },
+    ...options,
+  });
+  return r.json();
+}
+</script>
+
+{% block scripts %}{% endblock %}
+</body>
+</html>
